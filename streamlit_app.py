@@ -1,66 +1,49 @@
-import altair as alt
-import pandas as pd
 import streamlit as st
+import pandas as pd
+import plotly.express as px
 
-# Show the page title and description.
-st.set_page_config(page_title="Movies dataset", page_icon="🎬")
-st.title("🎬 Movies dataset")
-st.write(
-    """
-    This app visualizes data from [The Movie Database (TMDB)](https://www.kaggle.com/datasets/tmdb/tmdb-movie-metadata).
-    It shows which movie genre performed best at the box office over the years. Just 
-    click on the widgets below to explore!
-    """
-)
+# Configuración de la página
+st.set_page_config(page_title="📊 Jugadores Biwenger", layout="wide")
 
+st.title("📊 Jugadores Biwenger")
 
-# Load the data from a CSV. We're caching this so it doesn't reload every time the app
-# reruns (e.g. if the user interacts with the widgets).
+# URL de Dropbox: convierte enlace compartido en descarga directa
+# Ejemplo: https://www.dropbox.com/s/xxxxxx/archivo.xlsx?dl=0  → cambiar dl=0 por dl=1
+dropbox_url = "https://www.dropbox.com/scl/fi/pmu8u65lcmlcwpxhizw9l/clausulas_que_expiran_menos_48_h.xlsx?rlkey=xfbtdw10urjo71wkwh59rajrg&st=4hg404ew&dl=1"
+
 @st.cache_data
-def load_data():
-    df = pd.read_csv("data/movies_genres_summary.csv")
+def load_data(url):
+    df = pd.read_excel(url)
+    # Limpiar datos
+    df["Valor Actual"] = df["Valor Actual"].replace({r'[^\d]': ''}, regex=True).astype(float)
+    df["Fecha de Desbloqueo"] = pd.to_datetime(df["Fecha de Desbloqueo"], errors="coerce")
     return df
 
+df = load_data(dropbox_url)
 
-df = load_data()
+# Filtros
+col1, col2 = st.columns(2)
+propietarios = ["Todos"] + sorted(df["Propietario"].unique())
+propietario_sel = col1.selectbox("Filtrar por propietario", propietarios)
 
-# Show a multiselect widget with the genres using `st.multiselect`.
-genres = st.multiselect(
-    "Genres",
-    df.genre.unique(),
-    ["Action", "Adventure", "Biography", "Comedy", "Drama", "Horror"],
-)
+if propietario_sel != "Todos":
+    df = df[df["Propietario"] == propietario_sel]
 
-# Show a slider widget with the years using `st.slider`.
-years = st.slider("Years", 1986, 2006, (2000, 2016))
+# Tabla
+st.subheader("📋 Tabla de jugadores")
+st.dataframe(df.sort_values(by="Valor Actual", ascending=False))
 
-# Filter the dataframe based on the widget input and reshape it.
-df_filtered = df[(df["genre"].isin(genres)) & (df["year"].between(years[0], years[1]))]
-df_reshaped = df_filtered.pivot_table(
-    index="year", columns="genre", values="gross", aggfunc="sum", fill_value=0
-)
-df_reshaped = df_reshaped.sort_values(by="year", ascending=False)
+# Gráfica de valores por jugador
+st.subheader("💰 Valor actual por jugador")
+fig_valor = px.bar(df, x="Nombre", y="Valor Actual", color="Propietario", 
+                   title="Valor actual por jugador", 
+                   text="Valor Actual")
+st.plotly_chart(fig_valor, use_container_width=True)
 
-
-# Display the data as a table using `st.dataframe`.
-st.dataframe(
-    df_reshaped,
-    use_container_width=True,
-    column_config={"year": st.column_config.TextColumn("Year")},
-)
-
-# Display the data as an Altair chart using `st.altair_chart`.
-df_chart = pd.melt(
-    df_reshaped.reset_index(), id_vars="year", var_name="genre", value_name="gross"
-)
-chart = (
-    alt.Chart(df_chart)
-    .mark_line()
-    .encode(
-        x=alt.X("year:N", title="Year"),
-        y=alt.Y("gross:Q", title="Gross earnings ($)"),
-        color="genre:N",
-    )
-    .properties(height=320)
-)
-st.altair_chart(chart, use_container_width=True)
+# Gráfica de valor total por propietario
+st.subheader("📈 Valor total por propietario")
+valor_por_propietario = df.groupby("Propietario")["Valor Actual"].sum().reset_index()
+fig_propietario = px.bar(valor_por_propietario, x="Propietario", y="Valor Actual", 
+                         title="Valor total por propietario", 
+                         text="Valor Actual")
+st.plotly_chart(fig_propietario, use_container_width=True)
