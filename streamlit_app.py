@@ -232,7 +232,7 @@ with tab5:
     # Convertimos fecha
     df_clausulas["entry_date"] = pd.to_datetime(df_clausulas["entry_date"], errors="coerce")
 
-    # Filtramos últimos 7 días
+    # Filtramos últimos 7 días y 2 horas
     fecha_limite = pd.Timestamp.now() - pd.Timedelta(days=7, hours=2)
     df_recientes = df_clausulas[df_clausulas["entry_date"] >= fecha_limite]
 
@@ -248,15 +248,24 @@ with tab5:
     ).fillna(0)
 
     df_tab5["clausulazos_recibidos"] = df_tab5["clausulazos_recibidos"].astype(int)
-    df_tab5 = df_tab5.drop(columns=["from_id","id"])  # Eliminamos columnas innecesarias
-    df_tab5 = df_tab5.reset_index(drop=True)  # Esto elimina la columna index
+    df_tab5["clausulazos_restantes"] = 3 - df_tab5["clausulazos_recibidos"]
+    
+    # Eliminamos columnas innecesarias y el índice
+    df_tab5 = df_tab5.drop(columns=["from_id","id"]).reset_index(drop=True)
 
-    # Función para color semáforo
-    def color_semáforo(val):
-        color = {0:"#2ca02c", 1:"#ffdd57", 2:"#ff8c00", 3:"#d62728"}.get(val, "#cccccc")
-        return f'background-color: {color}; color: black; text-align:center; font-weight:bold;'
+    # Función para colorear toda la fila con tonos pastel
+    def color_fila(row):
+        pastel = {0:"#a8ddb5", 1:"#ffe699", 2:"#ffb366", 3:"#f77f7f"}
+        color = pastel.get(row["clausulazos_recibidos"], "#cccccc")
+        return [f'background-color: {color}; color: black; text-align:center; font-weight:bold;' for _ in row]
 
-    st.write("Cada celda indica cuántos clausulazos ha recibido el propietario en los últimos 7 días (máx 3).")
-    st.dataframe(df_tab5.style.applymap(color_semáforo, subset=["clausulazos_recibidos"]))
+    # Reducir ancho de las columnas
+    estilos_columnas = [
+        {'selector': 'th', 'props': [('min-width', '100px'), ('text-align', 'center')]},
+        {'selector': 'td', 'props': [('min-width', '100px'), ('text-align', 'center')]}
+    ]
+
+    st.write("Cada fila indica cuántos clausulazos ha recibido el propietario y cuántos le quedan (máx 3).")
+    st.dataframe(df_tab5.style.apply(color_fila, axis=1).set_table_styles(estilos_columnas))
 
 
