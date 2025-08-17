@@ -94,21 +94,39 @@ with tab1:
 
 
 # --- TAB 2: Estadísticas por propietario ---
+import plotly.colors as pc
+
 with tab2:
     st.subheader("💰 Valor total de jugadores por propietario (millones)")
     valor_por_propietario = df_jugadores.groupby("nombre_usuario")["valor_actual"].sum().reset_index()
     valor_por_propietario["Valor (M)"] = valor_por_propietario["valor_actual"]/1_000_000
     valor_por_propietario = valor_por_propietario.sort_values("Valor (M)", ascending=False)
 
+    # Colores consistentes
+    colores = pc.qualitative.Plotly  # lista de colores
+    color_map = {user: colores[i % len(colores)] for i, user in enumerate(sorted(valor_por_propietario["nombre_usuario"]))}
+
     fig_valor = px.bar(
         valor_por_propietario,
         x="nombre_usuario",
         y="Valor (M)",
         text=valor_por_propietario["Valor (M)"].map(lambda x: f"{x:.1f}M"),
-        color="nombre_usuario"
+        color="nombre_usuario",
+        color_discrete_map=color_map,
+        labels={"nombre_usuario": "Propietario", "Valor (M)": "Valor total (millones)"}
     )
     fig_valor.update_traces(textposition="outside")
-    fig_valor.update_layout(margin=dict(t=100), yaxis=dict(range=[0, valor_por_propietario["Valor (M)"].max()*1.15]))
+    fig_valor.update_layout(
+        margin=dict(t=100),
+        yaxis=dict(range=[0, valor_por_propietario["Valor (M)"].max()*1.15]),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=-0.3,
+            xanchor="center",
+            x=0.5
+        )
+    )
     st.plotly_chart(fig_valor, use_container_width=True)
 
     st.subheader("📈 Incremento diario del valor del equipo (millones)")
@@ -121,7 +139,9 @@ with tab2:
         x="nombre_usuario",
         y="Incremento (M)",
         text=incremento_por_propietario["Incremento (M)"].map(lambda x: f"{x:.2f}M"),
-        color="nombre_usuario"
+        color="nombre_usuario",
+        color_discrete_map=color_map,
+        labels={"nombre_usuario": "Propietario", "Incremento (M)": "Incremento diario (millones)"}
     )
     fig_incremento.update_traces(textposition="outside")
     fig_incremento.update_layout(
@@ -131,9 +151,18 @@ with tab2:
                 incremento_por_propietario["Incremento (M)"].min()*1.15,
                 incremento_por_propietario["Incremento (M)"].max()*1.15
             ]
-        )
+        ),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=-4,
+            xanchor="center",
+            x=0.5
+        ),    showlegend=False  # <- esto elimina la leyenda
+
     )
     st.plotly_chart(fig_incremento, use_container_width=True)
+
 
 # --- TAB 3: Cláusulas desbloqueadas ---
 with tab3:
