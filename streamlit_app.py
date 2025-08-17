@@ -233,7 +233,7 @@ with tab5:
     df_clausulas["entry_date"] = pd.to_datetime(df_clausulas["entry_date"], errors="coerce")
 
     # Filtramos últimos 7 días
-    fecha_limite = pd.Timestamp.now() - pd.Timedelta(days=7)
+    fecha_limite = pd.Timestamp.now() - pd.Timedelta(days=7, hours=2)
     df_recientes = df_clausulas[df_clausulas["entry_date"] >= fecha_limite]
 
     # Contamos clausulazos por emisor (from_id)
