@@ -62,18 +62,27 @@ with tab1:
     df_tab1["Puntos"] = df_tab1["puntos"].apply(lambda x: f"{int(x):,}".replace(",", "."))
     df_tab1["Horas Restantes"] = df_tab1["Horas_restantes"].apply(lambda x: f"{int(x)}h")  # redondeamos hacia abajo
 
-    # Imagenes HTML
-    df_tab1["Foto"] = df_tab1["enlace_imagen"].apply(lambda x: f'<img src="{x}" height="50">')
-    df_tab1["Icono"] = df_tab1["icono_propietario"].apply(lambda x: f'<img src="{x}" height="50">')
+    # Imagenes HTML centradas
+    df_tab1["Foto Jugador"] = df_tab1["enlace_imagen"].apply(
+        lambda x: f'<div style="text-align:center"><img src="{x}" height="50"></div>'
+    )
+    df_tab1["Icono Propietario"] = df_tab1["icono_propietario"].apply(
+        lambda x: f'<div style="text-align:center"><img src="{x}" height="50"></div>'
+    )
 
     # Seleccionamos y renombramos columnas en formato humano
-    cols_mostrar = {
-        "Foto": "Foto",
+    cols_mostrar = [
+        "Foto Jugador", "nombre", "equipo", "posicion", "nombre_usuario",
+        "Icono Propietario", "Valor Cláusula", "Valor Actual", "Puntos",
+        "Horas Restantes", "fecha_desbloqueo"
+    ]
+    cols_renombrar = {
+        "Foto Jugador": "Foto Jugador",
         "nombre": "Nombre",
         "equipo": "Equipo",
         "posicion": "Posición",
         "nombre_usuario": "Propietario",
-        "Icono": "Icono Propietario",
+        "Icono Propietario": "Icono Propietario",
         "Valor Cláusula": "Valor Cláusula",
         "Valor Actual": "Valor Actual",
         "Puntos": "Puntos",
@@ -81,7 +90,7 @@ with tab1:
         "fecha_desbloqueo": "Fecha Desbloqueo"
     }
 
-    st.write(df_tab1[list(cols_mostrar.keys())].rename(columns=cols_mostrar).to_html(escape=False,index=False), unsafe_allow_html=True)
+    st.write(df_tab1[cols_mostrar].rename(columns=cols_renombrar).to_html(escape=False, index=False), unsafe_allow_html=True)
 
 
 # --- TAB 2: Estadísticas por propietario ---
