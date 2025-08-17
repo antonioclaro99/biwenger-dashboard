@@ -33,12 +33,12 @@ df_jugadores = df_jugadores.merge(df_usuarios[["id","imagen"]], left_on="propiet
 df_jugadores = df_jugadores.rename(columns={"imagen":"icono_propietario"})
 
 # --- Tabs ---
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab5, tab3, tab2, tab4 = st.tabs([
     "⏳ Cláusulas próximas",
-    "📊 Estadísticas por propietario",
+    "🔨 Clausulazos recibidos < 7 días",
     "📝 Cláusulas desbloqueadas",
-    "📈 Gráficas adicionales",
-    "🔨 Clausulazos recibidos en los últimos 7 días"
+    "📊 Estadísticas por propietario",
+    "📈 Gráficas adicionales"
 ])
 
 # --- TAB 1: Cláusulas próximas ---
