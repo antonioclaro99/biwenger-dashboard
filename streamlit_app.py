@@ -165,11 +165,46 @@ with tab2:
 # --- TAB 3: Cláusulas desbloqueadas ---
 with tab3:
     st.subheader("Jugadores con cláusula desbloqueada recientemente")
-    df_tab3 = df_jugadores[df_jugadores["fecha_desbloqueo"] < pd.Timestamp.now()]
-    df_tab3["Foto"] = df_tab3["enlace_imagen"].apply(lambda x: f'<img src="{x}" width="60">')
-    df_tab3["Icono"] = df_tab3["icono_propietario"].apply(lambda x: f'<img src="{x}" width="40">')
-    cols_mostrar = ["Foto","nombre","equipo","posicion","nombre_usuario","Icono","valor_clausula","valor_actual","puntos","fecha_desbloqueo"]
-    st.write(df_tab3[cols_mostrar].to_html(escape=False,index=False), unsafe_allow_html=True)
+
+    # Filtramos solo las filas cuya fecha_desbloqueo es anterior a ahora
+    df_tab3 = df_jugadores[df_jugadores["fecha_desbloqueo"] < pd.Timestamp.now()].copy()
+
+    # Formateamos valores numéricos igual que tab1
+    df_tab3["Valor Cláusula"] = df_tab3["valor_clausula"].apply(lambda x: f"{int(x):,}".replace(",", "."))
+    df_tab3["Valor Actual"] = df_tab3["valor_actual"].apply(lambda x: f"{int(x):,}".replace(",", "."))
+    df_tab3["Puntos"] = df_tab3["puntos"].apply(lambda x: f"{int(x):,}".replace(",", "."))
+
+    # Imagenes HTML centradas
+    df_tab3["Foto Jugador"] = df_tab3["enlace_imagen"].apply(
+        lambda x: f'<div style="text-align:center"><img src="{x}" height="50"></div>'
+    )
+    df_tab3["Icono Propietario"] = df_tab3["icono_propietario"].apply(
+        lambda x: f'<div style="text-align:center"><img src="{x}" height="50"></div>'
+    )
+
+    # Columnas y renombrado igual que tab1
+    cols_mostrar = [
+        "Foto Jugador", "nombre", "equipo", "posicion", "nombre_usuario",
+        "Icono Propietario", "Valor Cláusula", "Valor Actual", "Puntos",
+        "fecha_desbloqueo"
+    ]
+    cols_renombrar = {
+        "Foto Jugador": "Foto Jugador",
+        "nombre": "Nombre",
+        "equipo": "Equipo",
+        "posicion": "Posición",
+        "nombre_usuario": "Propietario",
+        "Icono Propietario": "Icono Propietario",
+        "Valor Cláusula": "Valor Cláusula",
+        "Valor Actual": "Valor Actual",
+        "Puntos": "Puntos",
+        "fecha_desbloqueo": "Fecha Desbloqueo"
+    }
+
+    # Formateamos fecha de manera legible como en tab1
+    df_tab3["fecha_desbloqueo"] = df_tab3["fecha_desbloqueo"].dt.strftime("%d/%m/%Y %H:%M")
+
+    st.write(df_tab3[cols_mostrar].rename(columns=cols_renombrar).to_html(escape=False, index=False), unsafe_allow_html=True)
 
 # --- TAB 4: Gráficas adicionales ---
 with tab4:
