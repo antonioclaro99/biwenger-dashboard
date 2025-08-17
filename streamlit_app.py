@@ -112,7 +112,6 @@ with tab2:
     valor_por_propietario["Valor (M)"] = valor_por_propietario["valor_actual"] / 1_000_000
     valor_por_propietario = valor_por_propietario.sort_values("Valor (M)", ascending=False)
 
-    # Convertir a str para que sea categórico
     valor_por_propietario["propietario_id"] = valor_por_propietario["propietario_id"].astype(str)
 
     fig_valor = px.bar(
@@ -128,15 +127,15 @@ with tab2:
     fig_valor.update_layout(
         margin=dict(t=100),
         yaxis=dict(range=[0, valor_por_propietario["Valor (M)"].max() * 1.15]),
-        showlegend=False
+        showlegend=False,
+        dragmode=False  # <- deshabilita el arrastre/zoom
     )
-    st.plotly_chart(fig_valor, use_container_width=True)
+    st.plotly_chart(fig_valor, use_container_width=True, config={"displayModeBar": False})
 
     st.subheader("📈 Incremento diario del valor del equipo (millones)")
     incremento_por_propietario = df_jugadores.groupby(["nombre_usuario", "propietario_id"])["variacion_diaria"].sum().reset_index()
     incremento_por_propietario["Incremento (M)"] = incremento_por_propietario["variacion_diaria"] / 1_000_000
     incremento_por_propietario = incremento_por_propietario.sort_values("Incremento (M)", ascending=False)
-
     incremento_por_propietario["propietario_id"] = incremento_por_propietario["propietario_id"].astype(str)
 
     fig_incremento = px.bar(
@@ -157,9 +156,10 @@ with tab2:
                 incremento_por_propietario["Incremento (M)"].max() * 1.15
             ]
         ),
-        showlegend=False
+        showlegend=False,
+        dragmode=False  # <- deshabilita interacciones
     )
-    st.plotly_chart(fig_incremento, use_container_width=True)
+    st.plotly_chart(fig_incremento, use_container_width=True, config={"displayModeBar": False})
 
 
 # --- TAB 3: Cláusulas desbloqueadas ---
