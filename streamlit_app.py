@@ -94,53 +94,58 @@ with tab1:
 
 
 # --- TAB 2: Estadísticas por propietario ---
-import plotly.colors as pc
+import plotly.express as px
+
+# Paleta manual de colores bien diferenciados
+colores_manual = [
+    "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+    "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"
+]
+
+# Diccionario consistente por ID de propietario
+usuarios_ids = sorted(df_usuarios["id"].unique())
+color_map_id = {str(uid): colores_manual[i % len(colores_manual)] for i, uid in enumerate(usuarios_ids)}
 
 with tab2:
     st.subheader("💰 Valor total de jugadores por propietario (millones)")
-    valor_por_propietario = df_jugadores.groupby("nombre_usuario")["valor_actual"].sum().reset_index()
-    valor_por_propietario["Valor (M)"] = valor_por_propietario["valor_actual"]/1_000_000
+    valor_por_propietario = df_jugadores.groupby(["nombre_usuario", "propietario_id"])["valor_actual"].sum().reset_index()
+    valor_por_propietario["Valor (M)"] = valor_por_propietario["valor_actual"] / 1_000_000
     valor_por_propietario = valor_por_propietario.sort_values("Valor (M)", ascending=False)
 
-    # Colores consistentes
-    colores = pc.qualitative.Plotly  # lista de colores
-    color_map = {user: colores[i % len(colores)] for i, user in enumerate(sorted(valor_por_propietario["nombre_usuario"]))}
+    # Convertir a str para que sea categórico
+    valor_por_propietario["propietario_id"] = valor_por_propietario["propietario_id"].astype(str)
 
     fig_valor = px.bar(
         valor_por_propietario,
         x="nombre_usuario",
         y="Valor (M)",
         text=valor_por_propietario["Valor (M)"].map(lambda x: f"{x:.1f}M"),
-        color="nombre_usuario",
-        color_discrete_map=color_map,
+        color="propietario_id",
+        color_discrete_map=color_map_id,
         labels={"nombre_usuario": "Propietario", "Valor (M)": "Valor total (millones)"}
     )
     fig_valor.update_traces(textposition="outside")
     fig_valor.update_layout(
         margin=dict(t=100),
-        yaxis=dict(range=[0, valor_por_propietario["Valor (M)"].max()*1.15]),
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=-0.3,
-            xanchor="center",
-            x=0.5
-        )
+        yaxis=dict(range=[0, valor_por_propietario["Valor (M)"].max() * 1.15]),
+        showlegend=False
     )
     st.plotly_chart(fig_valor, use_container_width=True)
 
     st.subheader("📈 Incremento diario del valor del equipo (millones)")
-    incremento_por_propietario = df_jugadores.groupby("nombre_usuario")["variacion_diaria"].sum().reset_index()
-    incremento_por_propietario["Incremento (M)"] = incremento_por_propietario["variacion_diaria"]/1_000_000
+    incremento_por_propietario = df_jugadores.groupby(["nombre_usuario", "propietario_id"])["variacion_diaria"].sum().reset_index()
+    incremento_por_propietario["Incremento (M)"] = incremento_por_propietario["variacion_diaria"] / 1_000_000
     incremento_por_propietario = incremento_por_propietario.sort_values("Incremento (M)", ascending=False)
+
+    incremento_por_propietario["propietario_id"] = incremento_por_propietario["propietario_id"].astype(str)
 
     fig_incremento = px.bar(
         incremento_por_propietario,
         x="nombre_usuario",
         y="Incremento (M)",
         text=incremento_por_propietario["Incremento (M)"].map(lambda x: f"{x:.2f}M"),
-        color="nombre_usuario",
-        color_discrete_map=color_map,
+        color="propietario_id",
+        color_discrete_map=color_map_id,
         labels={"nombre_usuario": "Propietario", "Incremento (M)": "Incremento diario (millones)"}
     )
     fig_incremento.update_traces(textposition="outside")
@@ -148,18 +153,11 @@ with tab2:
         margin=dict(t=100),
         yaxis=dict(
             range=[
-                incremento_por_propietario["Incremento (M)"].min()*1.15,
-                incremento_por_propietario["Incremento (M)"].max()*1.15
+                incremento_por_propietario["Incremento (M)"].min() * 1.15,
+                incremento_por_propietario["Incremento (M)"].max() * 1.15
             ]
         ),
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=-4,
-            xanchor="center",
-            x=0.5
-        ),    showlegend=False  # <- esto elimina la leyenda
-
+        showlegend=False
     )
     st.plotly_chart(fig_incremento, use_container_width=True)
 
