@@ -237,35 +237,48 @@ with tab5:
     df_recientes = df_clausulas[df_clausulas["entry_date"] >= fecha_limite]
 
     # Contamos clausulazos por emisor (from_id)
-    clausulas_recibidas = df_recientes.groupby("from_id").size().reset_index(name="clausulazos_recibidos")
+    clausulas_recibidas = df_recientes.groupby("from_id").size().reset_index(name="Recibidos")
 
     # Limitamos a máximo 3
-    clausulas_recibidas["clausulazos_recibidos"] = clausulas_recibidas["clausulazos_recibidos"].clip(upper=3)
+    clausulas_recibidas["Recibidos"] = clausulas_recibidas["Recibidos"].clip(upper=3)
 
-    # Cruzamos con df_usuarios por id para que aparezcan todos los usuarios
+    # Cruzamos con df_usuarios por id
     df_tab5 = df_usuarios[["id", "nombre"]].merge(
         clausulas_recibidas, left_on="id", right_on="from_id", how="left"
     ).fillna(0)
 
-    df_tab5["clausulazos_recibidos"] = df_tab5["clausulazos_recibidos"].astype(int)
-    df_tab5["clausulazos_restantes"] = 3 - df_tab5["clausulazos_recibidos"]
-    
-    # Eliminamos columnas innecesarias y el índice
+    df_tab5["Recibidos"] = df_tab5["Recibidos"].astype(int)
+    df_tab5["Restantes"] = 3 - df_tab5["Recibidos"]
+
+    # Eliminamos columnas innecesarias e índice
     df_tab5 = df_tab5.drop(columns=["from_id","id"]).reset_index(drop=True)
+    df_tab5 = df_tab5.rename(columns={"nombre": "Nombre"})
 
     # Función para colorear toda la fila con tonos pastel
     def color_fila(row):
         pastel = {0:"#a8ddb5", 1:"#ffe699", 2:"#ffb366", 3:"#f77f7f"}
-        color = pastel.get(row["clausulazos_recibidos"], "#cccccc")
+        color = pastel.get(row["Recibidos"], "#cccccc")
         return [f'background-color: {color}; color: black; text-align:center; font-weight:bold;' for _ in row]
 
-    # Reducir ancho de las columnas
-    estilos_columnas = [
-        {'selector': 'th', 'props': [('min-width', '100px'), ('text-align', 'center')]},
-        {'selector': 'td', 'props': [('min-width', '100px'), ('text-align', 'center')]}
-    ]
+    # Aplicamos estilos
+    styled_df = df_tab5.style.apply(color_fila, axis=1)
 
-    st.write("Cada fila indica cuántos clausulazos ha recibido el propietario y cuántos le quedan (máx 3).")
-    st.dataframe(df_tab5.style.apply(color_fila, axis=1).set_table_styles(estilos_columnas))
+    # Convertimos a HTML
+    html_table = styled_df.to_html()
+
+    # Eliminamos el div sobrante final que provoca el cierre extra
+    html_table = html_table.replace("</div>", "")
+
+    # Mostramos en un contenedor que se adapte al ancho en móviles
+    st.markdown(
+        f"""
+        <div style="overflow-x:auto;">
+            {html_table}
+        """,
+        unsafe_allow_html=True
+    )
+
+
+
 
 
