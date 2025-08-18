@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from datetime import datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 from data_loader import (
     get_biwenger_token,
@@ -26,33 +27,39 @@ LEAGUE_ID = st.secrets["LEAGUE_ID"]
 USER_ID = st.secrets["USER_ID"]
 
 # ==============================
+# ZONA HORARIA
+# ==============================
+TZ = ZoneInfo("Europe/Madrid")
+
+# ==============================
 # FUNCIONES DE REFRESCO
 # ==============================
 def next_refresh_key() -> str:
     """Devuelve una clave distinta cuando toca refrescar los datos."""
-    now = datetime.now()
+    now = datetime.now(TZ)
 
     # Viernes → refresco a las horas y media (7:30, 8:30, ..., 21:30)
     if now.weekday() == 4:  # 0=lunes ... 4=viernes
         refresh_times = [time(h, 30) for h in range(7, 22)]  # 7:30 a 21:30
-        today_times = [datetime.combine(now.date(), t) for t in refresh_times]
+        today_times = [datetime.combine(now.date(), t, tzinfo=TZ) for t in refresh_times]
         last_refresh = max([dt for dt in today_times if dt <= now], default=None)
         if last_refresh is None:
-            last_refresh = datetime.combine(now.date() - timedelta(days=1), refresh_times[-1])
+            last_refresh = datetime.combine(now.date() - timedelta(days=1), refresh_times[-1], tzinfo=TZ)
         return last_refresh.strftime("%Y%m%d%H%M")
 
     # Resto de días → 3 veces al día
     refresh_times = [time(7, 10), time(12, 30), time(21, 10)]
-    today_times = [datetime.combine(now.date(), t) for t in refresh_times]
+    today_times = [datetime.combine(now.date(), t, tzinfo=TZ) for t in refresh_times]
     last_refresh = max([dt for dt in today_times if dt <= now], default=None)
     if last_refresh is None:
-        last_refresh = datetime.combine(now.date() - timedelta(days=1), refresh_times[-1])
+        last_refresh = datetime.combine(now.date() - timedelta(days=1), refresh_times[-1], tzinfo=TZ)
     return last_refresh.strftime("%Y%m%d%H%M")
+
 
 def daily_refresh_key() -> str:
     """Clave que cambia solo una vez al día a las 7:10."""
-    now = datetime.now()
-    ref_time = datetime.combine(now.date(), time(7, 10))
+    now = datetime.now(TZ)
+    ref_time = datetime.combine(now.date(), time(7, 10), tzinfo=TZ)
     if now < ref_time:
         # Si aún no son las 7:10, usar el día anterior
         ref_time -= timedelta(days=1)
@@ -98,7 +105,12 @@ df_liga, df_usuarios, df_jugadores, df_clausulas = load_data(next_refresh_key())
 
 # --- Preprocesamiento jugadores ---
 df_jugadores["valor_actual"] = pd.to_numeric(df_jugadores["valor_actual"], errors="coerce")
-df_jugadores["fecha_desbloqueo"] = pd.to_datetime(df_jugadores["fecha_desbloqueo"], errors="coerce")
+
+# 👇 Ajustamos fecha_desbloqueo: asumimos que viene en UTC de la API
+df_jugadores["fecha_desbloqueo"] = pd.to_datetime(
+    df_jugadores["fecha_desbloqueo"], errors="coerce", utc=True
+).dt.tz_convert(TZ)
+
 df_jugadores["variacion_diaria"] = pd.to_numeric(df_jugadores["variacion_diaria"], errors="coerce")
 
 # ==============================
@@ -107,7 +119,7 @@ df_jugadores["variacion_diaria"] = pd.to_numeric(df_jugadores["variacion_diaria"
 @st.cache_data
 def clausulas_abiertas_hoy(df_jugadores: pd.DataFrame, clave_dia: str):
     """Jugadores cuya cláusula se abre o está abierta en el día actual."""
-    ahora = pd.Timestamp.now()
+    ahora = pd.Timestamp.now(tz=TZ)
     hoy = ahora.normalize()
     df_hoy = df_jugadores[
         (df_jugadores["fecha_desbloqueo"].dt.date == hoy.date())
@@ -137,7 +149,7 @@ with tab1:
     posicion_sel = col3.selectbox("Filtrar por posición", posiciones)
 
     df_tab1 = df_jugadores.copy()
-    df_tab1["Horas_restantes"] = (df_tab1["fecha_desbloqueo"] - pd.Timestamp.now()).dt.total_seconds()/3600
+    df_tab1["Horas_restantes"] = (df_tab1["fecha_desbloqueo"] - pd.Timestamp.now(tz=TZ)).dt.total_seconds()/3600
     df_tab1 = df_tab1[df_tab1["Horas_restantes"] <= tiempo_max]
     if propietario_sel != "Todos":
         df_tab1 = df_tab1[df_tab1["nombre"] == propietario_sel]
@@ -151,7 +163,7 @@ with tab1:
 
     df_tab1["Foto Jugador"] = df_tab1["enlace_imagen"].apply(lambda x: f'<div style="text-align:center"><img src="{x}" height="50"></div>')
     df_tab1["Icono Propietario"] = df_tab1["imagen"].apply(lambda x: f'<div style="text-align:center"><img src="{x}" height="50"></div>')
-
+    df_tab1["fecha_desbloqueo"] = df_tab1["fecha_desbloqueo"].dt.strftime("%d/%m/%Y %H:%M")
     cols_mostrar = ["Foto Jugador", "nombre", "equipo", "posicion", "nombre", "Icono Propietario", "Valor Cláusula", "Valor Actual", "Puntos", "Horas Restantes", "fecha_desbloqueo"]
     cols_renombrar = {"nombre": "Propietario", "equipo": "Equipo", "posicion": "Posición", "fecha_desbloqueo": "Fecha Desbloqueo"}
 
@@ -164,23 +176,33 @@ colores_manual = [
     "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
     "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"
 ]
-usuarios_ids = sorted(df_usuarios["id"].unique())
-color_map_id = {str(uid): colores_manual[i % len(colores_manual)] for i, uid in enumerate(usuarios_ids)}
+
+# Crear mapping de colores por propietario_id (como string)
+usuarios_ids = sorted(df_usuarios["id"].astype(int).astype(str).unique())
+color_map_id = {uid: colores_manual[i % len(colores_manual)] for i, uid in enumerate(usuarios_ids)}
 
 with tab2:
     st.subheader("💰 Valor total de jugadores por propietario (millones)")
-    valor_por_propietario = df_jugadores.groupby(["nombre_usuario", "propietario_id"])["valor_actual"].sum().reset_index()
+    valor_por_propietario = (
+        df_jugadores.groupby(["nombre_usuario", "propietario_id"])["valor_actual"]
+        .sum()
+        .reset_index()
+    )
     valor_por_propietario["Valor (M)"] = valor_por_propietario["valor_actual"] / 1_000_000
-    valor_por_propietario = valor_por_propietario.sort_values("Valor (M)", ascending=False)
-    valor_por_propietario["propietario_id"] = valor_por_propietario["propietario_id"].astype(str)
+    valor_por_propietario["propietario_id_str"] = valor_por_propietario["propietario_id"].astype(int).astype(str)
 
+    # Orden descendente por Valor (M)
+    valor_por_propietario = valor_por_propietario.sort_values("Valor (M)", ascending=False)
+
+    # Forzar el orden de x según el valor
     fig_valor = px.bar(
         valor_por_propietario,
         x="nombre_usuario",
         y="Valor (M)",
         text=valor_por_propietario["Valor (M)"].map(lambda x: f"{x:.1f}M"),
-        color="propietario_id",
+        color="propietario_id_str",
         color_discrete_map=color_map_id,
+        category_orders={"nombre_usuario": valor_por_propietario["nombre_usuario"].tolist()},
         labels={"nombre_usuario": "Propietario", "Valor (M)": "Valor total (millones)"}
     )
     fig_valor.update_traces(textposition="outside")
@@ -193,18 +215,26 @@ with tab2:
     st.plotly_chart(fig_valor, use_container_width=True, config={"displayModeBar": False})
 
     st.subheader("📈 Incremento diario del valor del equipo (millones)")
-    incremento_por_propietario = df_jugadores.groupby(["nombre_usuario", "propietario_id"])["variacion_diaria"].sum().reset_index()
+    incremento_por_propietario = (
+        df_jugadores.groupby(["nombre_usuario", "propietario_id"])["variacion_diaria"]
+        .sum()
+        .reset_index()
+    )
     incremento_por_propietario["Incremento (M)"] = incremento_por_propietario["variacion_diaria"] / 1_000_000
-    incremento_por_propietario = incremento_por_propietario.sort_values("Incremento (M)", ascending=False)
-    incremento_por_propietario["propietario_id"] = incremento_por_propietario["propietario_id"].astype(str)
+    incremento_por_propietario["propietario_id_str"] = incremento_por_propietario["propietario_id"].astype(int).astype(str)
 
+    # Orden descendente por Incremento (M)
+    incremento_por_propietario = incremento_por_propietario.sort_values("Incremento (M)", ascending=False)
+
+    # Forzar el orden de x según el valor
     fig_incremento = px.bar(
         incremento_por_propietario,
         x="nombre_usuario",
         y="Incremento (M)",
         text=incremento_por_propietario["Incremento (M)"].map(lambda x: f"{x:.2f}M"),
-        color="propietario_id",
+        color="propietario_id_str",
         color_discrete_map=color_map_id,
+        category_orders={"nombre_usuario": incremento_por_propietario["nombre_usuario"].tolist()},
         labels={"nombre_usuario": "Propietario", "Incremento (M)": "Incremento diario (millones)"}
     )
     fig_incremento.update_traces(textposition="outside")
@@ -221,12 +251,14 @@ with tab2:
     )
     st.plotly_chart(fig_incremento, use_container_width=True, config={"displayModeBar": False})
 
+
 # -----------------------------------------------------------------
 # TAB 3: Cláusulas desbloqueadas
 # -----------------------------------------------------------------
 with tab3:
     st.subheader("Jugadores con cláusula desbloqueada recientemente")
-    df_tab3 = df_jugadores[df_jugadores["fecha_desbloqueo"] < pd.Timestamp.now()].copy()
+    now = pd.Timestamp.now(tz=TZ)
+    df_tab3 = df_jugadores[df_jugadores["fecha_desbloqueo"].notna() & (df_jugadores["fecha_desbloqueo"] < now)].copy()
     df_tab3["Valor Cláusula"] = df_tab3["valor_clausula"].apply(lambda x: f"{int(x):,}".replace(",", "."))
     df_tab3["Valor Actual"] = df_tab3["valor_actual"].apply(lambda x: f"{int(x):,}".replace(",", "."))
     df_tab3["Puntos"] = df_tab3["puntos"].apply(lambda x: f"{int(x):,}".replace(",", "."))
@@ -257,7 +289,8 @@ with tab4:
 # -----------------------------------------------------------------
 with tab5:
     st.subheader("Clausulazos recibidos por propietario en los últimos 7 días")
-    fecha_limite = pd.Timestamp.now() - pd.Timedelta(days=7, hours=2)
+    fecha_limite = pd.Timestamp.now(tz=TZ) - pd.Timedelta(days=7, hours=2)
+    df_clausulas["entry_date"] = pd.to_datetime(df_clausulas["entry_date"], utc=True).dt.tz_convert(TZ)
     df_recientes = df_clausulas[df_clausulas["entry_date"] >= fecha_limite]
     clausulas_recibidas = df_recientes.groupby("from_id").size().reset_index(name="Recibidos")
     clausulas_recibidas["Recibidos"] = clausulas_recibidas["Recibidos"].clip(upper=3)
