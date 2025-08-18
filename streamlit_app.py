@@ -1,47 +1,131 @@
-import streamlit as st
+import streamlit as st 
 import pandas as pd
 import plotly.express as px
-from datetime import datetime
+from datetime import datetime, time, timedelta
 
+from data_loader import (
+    get_biwenger_token,
+    get_league_data,
+    get_public_players,
+    get_user_players,
+    obtener_clausulas_ejecutadas,
+)
+
+# ==============================
+# CONFIG STREAMLIT
+# ==============================
 st.set_page_config(page_title="📊 Jugadores Biwenger", layout="wide")
 st.title("📊 Jugadores Biwenger")
 
-# --- URLs de Dropbox ---
-url_liga = "https://www.dropbox.com/scl/fi/dy5rnly5qmjw8o5vbprvu/liga.csv?rlkey=dcnb8vjdzadcleukoqu3r4yx2&st=w3fhqlup&dl=1"
-url_usuarios = "https://www.dropbox.com/scl/fi/7i5j3n3semnp6js8zy678/usuarios.csv?rlkey=u0gir8jctlr6w8trxdfavmq8d&st=cgenm5zl&dl=1"
-url_jugadores = "https://www.dropbox.com/scl/fi/e965d1089v7umaw57yifq/jugadores_final.csv?rlkey=cgssxqhipl782c0qc4coytdnc&st=43zelkr6&dl=1"
-url_clausulas = "https://www.dropbox.com/scl/fi/gedow86lz673fgm8ximom/clausulas.csv?rlkey=1alc7fdqg3ecdwkw5kwlheo1i&st=zqbaa81m&dl=1"
+# ==============================
+# VARIABLES SECRETAS
+# ==============================
+EMAIL = st.secrets["EMAIL"]
+PASSWORD = st.secrets["PASSWORD"]
+LEAGUE_ID = st.secrets["LEAGUE_ID"]
+USER_ID = st.secrets["USER_ID"]
 
+# ==============================
+# FUNCIONES DE REFRESCO
+# ==============================
+def next_refresh_key() -> str:
+    """Devuelve una clave distinta cuando toca refrescar los datos."""
+    now = datetime.now()
 
+    # Viernes → refresco a las horas y media (7:30, 8:30, ..., 21:30)
+    if now.weekday() == 4:  # 0=lunes ... 4=viernes
+        refresh_times = [time(h, 30) for h in range(7, 22)]  # 7:30 a 21:30
+        today_times = [datetime.combine(now.date(), t) for t in refresh_times]
+        last_refresh = max([dt for dt in today_times if dt <= now], default=None)
+        if last_refresh is None:
+            last_refresh = datetime.combine(now.date() - timedelta(days=1), refresh_times[-1])
+        return last_refresh.strftime("%Y%m%d%H%M")
+
+    # Resto de días → 3 veces al día
+    refresh_times = [time(7, 10), time(12, 30), time(21, 10)]
+    today_times = [datetime.combine(now.date(), t) for t in refresh_times]
+    last_refresh = max([dt for dt in today_times if dt <= now], default=None)
+    if last_refresh is None:
+        last_refresh = datetime.combine(now.date() - timedelta(days=1), refresh_times[-1])
+    return last_refresh.strftime("%Y%m%d%H%M")
+
+def daily_refresh_key() -> str:
+    """Clave que cambia solo una vez al día a las 7:10."""
+    now = datetime.now()
+    ref_time = datetime.combine(now.date(), time(7, 10))
+    if now < ref_time:
+        # Si aún no son las 7:10, usar el día anterior
+        ref_time -= timedelta(days=1)
+    return ref_time.strftime("%Y%m%d")
+
+# ==============================
+# CARGA DE DATOS
+# ==============================
 @st.cache_data
-def load_csv(url):
-    return pd.read_csv(url)
+def load_data(dummy_key: str):
+    token = get_biwenger_token(EMAIL, PASSWORD)
 
-df_liga = load_csv(url_liga)
-df_usuarios = load_csv(url_usuarios)
-df_jugadores = load_csv(url_jugadores)
-df_clausulas = load_csv(url_clausulas)
+    # Liga y usuarios
+    df_liga, df_usuarios = get_league_data(LEAGUE_ID, token, USER_ID)
 
+    # Jugadores públicos
+    df_players_public = get_public_players()
+
+    # Jugadores de cada usuario
+    df_all_owned = pd.DataFrame()
+    for _, user in df_usuarios.iterrows():
+        df_user_players = get_user_players(USER_ID, user["id"], LEAGUE_ID, token)
+        df_all_owned = pd.concat([df_all_owned, df_user_players], ignore_index=True)
+
+    # Join: unir jugadores públicos con propietarios
+    df_jugadores = df_players_public.merge(df_all_owned, on="id", how="left")
+    df_jugadores = df_jugadores.merge(
+        df_usuarios[["id", "nombre", "imagen"]],
+        left_on="propietario_id",
+        right_on="id",
+        how="left",
+        suffixes=("", "_usuario")
+    )
+    df_jugadores.drop(columns=["id_usuario"], inplace=True)
+
+    # Clausulas ejecutadas
+    df_clausulas = obtener_clausulas_ejecutadas(LEAGUE_ID, USER_ID, token, limit=50)
+
+    return df_liga, df_usuarios, df_jugadores, df_clausulas
+
+# 🟢 Cargar datos
+df_liga, df_usuarios, df_jugadores, df_clausulas = load_data(next_refresh_key())
 
 # --- Preprocesamiento jugadores ---
-df_jugadores["valor_actual"] = df_jugadores["valor_actual"].replace({r"[^\d]": ""}, regex=True).astype(float)
+df_jugadores["valor_actual"] = pd.to_numeric(df_jugadores["valor_actual"], errors="coerce")
 df_jugadores["fecha_desbloqueo"] = pd.to_datetime(df_jugadores["fecha_desbloqueo"], errors="coerce")
-df_jugadores["variacion_diaria"] = df_jugadores["variacion_diaria"].astype(float)
+df_jugadores["variacion_diaria"] = pd.to_numeric(df_jugadores["variacion_diaria"], errors="coerce")
 
-# Unimos icono de propietario
-df_jugadores = df_jugadores.merge(df_usuarios[["id","imagen"]], left_on="propietario_id", right_on="id", how="left")
-df_jugadores = df_jugadores.rename(columns={"imagen":"icono_propietario"})
+# ==============================
+# FUNCIONES EXTRA
+# ==============================
+@st.cache_data
+def clausulas_abiertas_hoy(df_jugadores: pd.DataFrame, clave_dia: str):
+    """Jugadores cuya cláusula se abre o está abierta en el día actual."""
+    ahora = pd.Timestamp.now()
+    hoy = ahora.normalize()
+    df_hoy = df_jugadores[
+        (df_jugadores["fecha_desbloqueo"].dt.date == hoy.date())
+    ].copy()
+    return df_hoy
 
 # --- Tabs ---
-tab1, tab5, tab3, tab2, tab4 = st.tabs([
+tab1, tab5, tab3, tab2, tab4, tab6 = st.tabs([
     "⏳ Cláusulas próximas",
     "🔨 Clausulazos recibidos < 7 días",
     "📝 Cláusulas desbloqueadas",
     "📊 Estadísticas por propietario",
-    "📈 Gráficas adicionales"
+    "📈 Gráficas adicionales",
+    "📅 Cláusulas de hoy"
 ])
-
-# --- TAB 1: Cláusulas próximas ---
+# -----------------------------------------------------------------
+# TAB 1: Cláusulas próximas
+# -----------------------------------------------------------------
 with tab1:
     st.subheader("Filtros de cláusulas próximas")
     col1, col2, col3 = st.columns(3)
@@ -53,61 +137,33 @@ with tab1:
     posicion_sel = col3.selectbox("Filtrar por posición", posiciones)
 
     df_tab1 = df_jugadores.copy()
-    # Calculamos horas restantes
     df_tab1["Horas_restantes"] = (df_tab1["fecha_desbloqueo"] - pd.Timestamp.now()).dt.total_seconds()/3600
     df_tab1 = df_tab1[df_tab1["Horas_restantes"] <= tiempo_max]
     if propietario_sel != "Todos":
-        df_tab1 = df_tab1[df_tab1["nombre_usuario"] == propietario_sel]
+        df_tab1 = df_tab1[df_tab1["nombre"] == propietario_sel]
     if posicion_sel != "Todas":
         df_tab1 = df_tab1[df_tab1["posicion"] == posicion_sel]
 
-    # Formateamos valores numéricos
-    df_tab1["Valor Cláusula"] = df_tab1["valor_clausula"].apply(lambda x: f"{int(x):,}".replace(",", "."))
+    df_tab1["Valor Cláusula"] = df_tab1["valor_clausula"].apply(lambda x: f"{int(x):,}".replace(",", ".")) if "valor_clausula" in df_tab1 else "-"
     df_tab1["Valor Actual"] = df_tab1["valor_actual"].apply(lambda x: f"{int(x):,}".replace(",", "."))
     df_tab1["Puntos"] = df_tab1["puntos"].apply(lambda x: f"{int(x):,}".replace(",", "."))
-    df_tab1["Horas Restantes"] = df_tab1["Horas_restantes"].apply(lambda x: f"{int(x)}h")  # redondeamos hacia abajo
+    df_tab1["Horas Restantes"] = df_tab1["Horas_restantes"].apply(lambda x: f"{int(x)}h")
 
-    # Imagenes HTML centradas
-    df_tab1["Foto Jugador"] = df_tab1["enlace_imagen"].apply(
-        lambda x: f'<div style="text-align:center"><img src="{x}" height="50"></div>'
-    )
-    df_tab1["Icono Propietario"] = df_tab1["icono_propietario"].apply(
-        lambda x: f'<div style="text-align:center"><img src="{x}" height="50"></div>'
-    )
+    df_tab1["Foto Jugador"] = df_tab1["enlace_imagen"].apply(lambda x: f'<div style="text-align:center"><img src="{x}" height="50"></div>')
+    df_tab1["Icono Propietario"] = df_tab1["imagen"].apply(lambda x: f'<div style="text-align:center"><img src="{x}" height="50"></div>')
 
-    # Seleccionamos y renombramos columnas en formato humano
-    cols_mostrar = [
-        "Foto Jugador", "nombre", "equipo", "posicion", "nombre_usuario",
-        "Icono Propietario", "Valor Cláusula", "Valor Actual", "Puntos",
-        "Horas Restantes", "fecha_desbloqueo"
-    ]
-    cols_renombrar = {
-        "Foto Jugador": "Foto Jugador",
-        "nombre": "Nombre",
-        "equipo": "Equipo",
-        "posicion": "Posición",
-        "nombre_usuario": "Propietario",
-        "Icono Propietario": "Icono Propietario",
-        "Valor Cláusula": "Valor Cláusula",
-        "Valor Actual": "Valor Actual",
-        "Puntos": "Puntos",
-        "Horas Restantes": "Horas Restantes",
-        "fecha_desbloqueo": "Fecha Desbloqueo"
-    }
+    cols_mostrar = ["Foto Jugador", "nombre", "equipo", "posicion", "nombre", "Icono Propietario", "Valor Cláusula", "Valor Actual", "Puntos", "Horas Restantes", "fecha_desbloqueo"]
+    cols_renombrar = {"nombre": "Propietario", "equipo": "Equipo", "posicion": "Posición", "fecha_desbloqueo": "Fecha Desbloqueo"}
 
     st.write(df_tab1[cols_mostrar].rename(columns=cols_renombrar).to_html(escape=False, index=False), unsafe_allow_html=True)
 
-
-# --- TAB 2: Estadísticas por propietario ---
-import plotly.express as px
-
-# Paleta manual de colores bien diferenciados
+# -----------------------------------------------------------------
+# TAB 2: Estadísticas por propietario
+# -----------------------------------------------------------------
 colores_manual = [
     "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
     "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"
 ]
-
-# Diccionario consistente por ID de propietario
 usuarios_ids = sorted(df_usuarios["id"].unique())
 color_map_id = {str(uid): colores_manual[i % len(colores_manual)] for i, uid in enumerate(usuarios_ids)}
 
@@ -116,7 +172,6 @@ with tab2:
     valor_por_propietario = df_jugadores.groupby(["nombre_usuario", "propietario_id"])["valor_actual"].sum().reset_index()
     valor_por_propietario["Valor (M)"] = valor_por_propietario["valor_actual"] / 1_000_000
     valor_por_propietario = valor_por_propietario.sort_values("Valor (M)", ascending=False)
-
     valor_por_propietario["propietario_id"] = valor_por_propietario["propietario_id"].astype(str)
 
     fig_valor = px.bar(
@@ -133,7 +188,7 @@ with tab2:
         margin=dict(t=100),
         yaxis=dict(range=[0, valor_por_propietario["Valor (M)"].max() * 1.15]),
         showlegend=False,
-        dragmode=False  # <- deshabilita el arrastre/zoom
+        dragmode=False
     )
     st.plotly_chart(fig_valor, use_container_width=True, config={"displayModeBar": False})
 
@@ -162,60 +217,33 @@ with tab2:
             ]
         ),
         showlegend=False,
-        dragmode=False  # <- deshabilita interacciones
+        dragmode=False
     )
     st.plotly_chart(fig_incremento, use_container_width=True, config={"displayModeBar": False})
 
-
-# --- TAB 3: Cláusulas desbloqueadas ---
+# -----------------------------------------------------------------
+# TAB 3: Cláusulas desbloqueadas
+# -----------------------------------------------------------------
 with tab3:
     st.subheader("Jugadores con cláusula desbloqueada recientemente")
-
-    # Filtramos solo las filas cuya fecha_desbloqueo es anterior a ahora
     df_tab3 = df_jugadores[df_jugadores["fecha_desbloqueo"] < pd.Timestamp.now()].copy()
-
-    # Formateamos valores numéricos igual que tab1
     df_tab3["Valor Cláusula"] = df_tab3["valor_clausula"].apply(lambda x: f"{int(x):,}".replace(",", "."))
     df_tab3["Valor Actual"] = df_tab3["valor_actual"].apply(lambda x: f"{int(x):,}".replace(",", "."))
     df_tab3["Puntos"] = df_tab3["puntos"].apply(lambda x: f"{int(x):,}".replace(",", "."))
-
-    # Imagenes HTML centradas
-    df_tab3["Foto Jugador"] = df_tab3["enlace_imagen"].apply(
-        lambda x: f'<div style="text-align:center"><img src="{x}" height="50"></div>'
-    )
-    df_tab3["Icono Propietario"] = df_tab3["icono_propietario"].apply(
-        lambda x: f'<div style="text-align:center"><img src="{x}" height="50"></div>'
-    )
-
-    # Columnas y renombrado igual que tab1
-    cols_mostrar = [
-        "Foto Jugador", "nombre", "equipo", "posicion", "nombre_usuario",
-        "Icono Propietario", "Valor Cláusula", "Valor Actual", "Puntos",
-        "fecha_desbloqueo"
-    ]
-    cols_renombrar = {
-        "Foto Jugador": "Foto Jugador",
-        "nombre": "Nombre",
-        "equipo": "Equipo",
-        "posicion": "Posición",
-        "nombre_usuario": "Propietario",
-        "Icono Propietario": "Icono Propietario",
-        "Valor Cláusula": "Valor Cláusula",
-        "Valor Actual": "Valor Actual",
-        "Puntos": "Puntos",
-        "fecha_desbloqueo": "Fecha Desbloqueo"
-    }
-
-    # Formateamos fecha de manera legible como en tab1
+    df_tab3["Foto Jugador"] = df_tab3["enlace_imagen"].apply(lambda x: f'<div style="text-align:center"><img src="{x}" height="50"></div>')
+    df_tab3["Icono Propietario"] = df_tab3["imagen"].apply(lambda x: f'<div style="text-align:center"><img src="{x}" height="50"></div>')
     df_tab3["fecha_desbloqueo"] = df_tab3["fecha_desbloqueo"].dt.strftime("%d/%m/%Y %H:%M")
-
+    cols_mostrar = ["Foto Jugador", "nombre", "equipo", "posicion", "nombre", "Icono Propietario", "Valor Cláusula", "Valor Actual", "Puntos", "fecha_desbloqueo"]
+    cols_renombrar = {"nombre": "Propietario", "equipo": "Equipo", "posicion": "Posición", "fecha_desbloqueo": "Fecha Desbloqueo"}
     st.write(df_tab3[cols_mostrar].rename(columns=cols_renombrar).to_html(escape=False, index=False), unsafe_allow_html=True)
 
-# --- TAB 4: Gráficas adicionales ---
+# -----------------------------------------------------------------
+# TAB 4: Gráficas adicionales
+# -----------------------------------------------------------------
 with tab4:
     st.subheader("🏆 Top 10 jugadores por valor")
     top_jugadores = df_jugadores.sort_values("valor_actual", ascending=False).head(10)
-    st.dataframe(top_jugadores[["nombre","equipo","nombre_usuario","valor_actual","puntos"]])
+    st.dataframe(top_jugadores[["nombre", "equipo", "valor_actual", "puntos"]])
 
     st.subheader("📊 Valor medio por posición")
     valor_pos = df_jugadores.groupby("posicion")["valor_actual"].mean().reset_index()
@@ -224,61 +252,48 @@ with tab4:
     fig_pos.update_traces(textposition="outside")
     st.plotly_chart(fig_pos, use_container_width=True)
 
-
-# --- TAB 5: Cláusulazos recibidos ---
+# -----------------------------------------------------------------
+# TAB 5: Clausulazos recibidos
+# -----------------------------------------------------------------
 with tab5:
     st.subheader("Clausulazos recibidos por propietario en los últimos 7 días")
-
-    # Convertimos fecha
-    df_clausulas["entry_date"] = pd.to_datetime(df_clausulas["entry_date"], errors="coerce")
-
-    # Filtramos últimos 7 días y 2 horas
     fecha_limite = pd.Timestamp.now() - pd.Timedelta(days=7, hours=2)
     df_recientes = df_clausulas[df_clausulas["entry_date"] >= fecha_limite]
-
-    # Contamos clausulazos por emisor (from_id)
     clausulas_recibidas = df_recientes.groupby("from_id").size().reset_index(name="Recibidos")
-
-    # Limitamos a máximo 3
     clausulas_recibidas["Recibidos"] = clausulas_recibidas["Recibidos"].clip(upper=3)
-
-    # Cruzamos con df_usuarios por id
-    df_tab5 = df_usuarios[["id", "nombre"]].merge(
-        clausulas_recibidas, left_on="id", right_on="from_id", how="left"
-    ).fillna(0)
-
+    df_tab5 = df_usuarios[["id", "nombre"]].merge(clausulas_recibidas, left_on="id", right_on="from_id", how="left").fillna(0)
     df_tab5["Recibidos"] = df_tab5["Recibidos"].astype(int)
     df_tab5["Restantes"] = 3 - df_tab5["Recibidos"]
-
-    # Eliminamos columnas innecesarias e índice
-    df_tab5 = df_tab5.drop(columns=["from_id","id"]).reset_index(drop=True)
+    df_tab5 = df_tab5.drop(columns=["from_id", "id"]).reset_index(drop=True)
     df_tab5 = df_tab5.rename(columns={"nombre": "Nombre"})
 
-    # Función para colorear toda la fila con tonos pastel
     def color_fila(row):
-        pastel = {0:"#a8ddb5", 1:"#ffe699", 2:"#ffb366", 3:"#f77f7f"}
+        pastel = {0: "#a8ddb5", 1: "#ffe699", 2: "#ffb366", 3: "#f77f7f"}
         color = pastel.get(row["Recibidos"], "#cccccc")
         return [f'background-color: {color}; color: black; text-align:center; font-weight:bold;' for _ in row]
 
-    # Aplicamos estilos
     styled_df = df_tab5.style.apply(color_fila, axis=1)
+    html_table = styled_df.to_html().replace("</div>", "")
+    st.markdown(f"<div style='overflow-x:auto;'>{html_table}", unsafe_allow_html=True)
 
-    # Convertimos a HTML
-    html_table = styled_df.to_html()
+# -----------------------------------------------------------------
+# TAB 6: Cláusulas de hoy
+# -----------------------------------------------------------------
+with tab6:
+    st.subheader("📅 Jugadores con cláusula abierta o desbloqueada hoy")
 
-    # Eliminamos el div sobrante final que provoca el cierre extra
-    html_table = html_table.replace("</div>", "")
+    # 👇 Pasamos la clave diaria
+    df_hoy = clausulas_abiertas_hoy(df_jugadores, daily_refresh_key())
 
-    # Mostramos en un contenedor que se adapte al ancho en móviles
-    st.markdown(
-        f"""
-        <div style="overflow-x:auto;">
-            {html_table}
-        """,
-        unsafe_allow_html=True
-    )
-
-
-
-
-
+    if df_hoy.empty:
+        st.info("No hay cláusulas que se hayan abierto hoy")
+    else:
+        df_hoy["Valor Cláusula"] = df_hoy["valor_clausula"].apply(lambda x: f"{int(x):,}".replace(",", "."))
+        df_hoy["Valor Actual"] = df_hoy["valor_actual"].apply(lambda x: f"{int(x):,}".replace(",", "."))
+        df_hoy["Puntos"] = df_hoy["puntos"].apply(lambda x: f"{int(x):,}".replace(",", "."))
+        df_hoy["Foto Jugador"] = df_hoy["enlace_imagen"].apply(lambda x: f'<div style="text-align:center"><img src="{x}" height="50"></div>')
+        df_hoy["Icono Propietario"] = df_hoy["imagen"].apply(lambda x: f'<div style="text-align:center"><img src="{x}" height="50"></div>')
+        df_hoy["fecha_desbloqueo"] = df_hoy["fecha_desbloqueo"].dt.strftime("%d/%m/%Y %H:%M")
+        cols_mostrar = ["Foto Jugador", "nombre", "equipo", "posicion", "nombre", "Icono Propietario", "Valor Cláusula", "Valor Actual", "Puntos", "fecha_desbloqueo"]
+        cols_renombrar = {"nombre": "Propietario", "equipo": "Equipo", "posicion": "Posición", "fecha_desbloqueo": "Fecha Desbloqueo"}
+        st.write(df_hoy[cols_mostrar].rename(columns=cols_renombrar).to_html(escape=False, index=False), unsafe_allow_html=True)
