@@ -57,9 +57,9 @@ def next_refresh_key() -> str:
 
 
 def daily_refresh_key() -> str:
-    """Clave que cambia solo una vez al día a las 7:10."""
+    """Clave que cambia solo una vez al día a las 00:01."""
     now = datetime.now(TZ)
-    ref_time = datetime.combine(now.date(), time(7, 10), tzinfo=TZ)
+    ref_time = datetime.combine(now.date(), time(0, 1), tzinfo=TZ)
     if now < ref_time:
         # Si aún no son las 7:10, usar el día anterior
         ref_time -= timedelta(days=1)
@@ -317,6 +317,10 @@ with tab6:
 
     # 👇 Pasamos la clave diaria
     df_hoy = clausulas_abiertas_hoy(df_jugadores, daily_refresh_key())
+    now = pd.Timestamp.now(tz=TZ)
+
+    df_hoy = df_hoy[df_hoy["fecha_desbloqueo"].notna() & (df_hoy["fecha_desbloqueo"] < now)].copy()
+
 
     if df_hoy.empty:
         st.info("No hay cláusulas que se hayan abierto hoy")
