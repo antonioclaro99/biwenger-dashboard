@@ -103,15 +103,23 @@ def load_data(dummy_key: str):
 # 🟢 Cargar datos
 df_liga, df_usuarios, df_jugadores, df_clausulas = load_data(next_refresh_key())
 
+_, _, df_jugadores_diario, _ = load_data(daily_refresh_key())
+
 # --- Preprocesamiento jugadores ---
 df_jugadores["valor_actual"] = pd.to_numeric(df_jugadores["valor_actual"], errors="coerce")
+df_jugadores_diario["valor_actual"] = pd.to_numeric(df_jugadores_diario["valor_actual"], errors="coerce")
 
 # 👇 Ajustamos fecha_desbloqueo: asumimos que viene en UTC de la API
 df_jugadores["fecha_desbloqueo"] = pd.to_datetime(
     df_jugadores["fecha_desbloqueo"], errors="coerce", utc=True
 ).dt.tz_convert(TZ)
 
-df_jugadores["variacion_diaria"] = pd.to_numeric(df_jugadores["variacion_diaria"], errors="coerce")
+df_jugadores_diario["fecha_desbloqueo"] = pd.to_datetime(
+    df_jugadores_diario["fecha_desbloqueo"], errors="coerce", utc=True
+).dt.tz_convert(TZ)
+
+df_jugadores_diario["variacion_diaria"] = pd.to_numeric(df_jugadores["variacion_diaria"], errors="coerce")
+df_jugadores_diario["variacion_diaria"] = pd.to_numeric(df_jugadores["variacion_diaria"], errors="coerce")
 
 # ==============================
 # FUNCIONES EXTRA
@@ -120,10 +128,19 @@ df_jugadores["variacion_diaria"] = pd.to_numeric(df_jugadores["variacion_diaria"
 def clausulas_abiertas_hoy(df_jugadores: pd.DataFrame, clave_dia: str):
     """Jugadores cuya cláusula se abre o está abierta en el día actual."""
     ahora = pd.Timestamp.now(tz=TZ)
+    # mañana = ahora + pd.Timedelta(days=1)
+
     hoy = ahora.normalize()
-    df_hoy = df_jugadores[
-        (df_jugadores["fecha_desbloqueo"].dt.date == hoy.date())
+
+    filtro = df_jugadores[df_jugadores["fecha_desbloqueo"].notna()]# excluye NaT y NaN
+    # resultado = df_jugadores.loc[filtro, "fecha_desbloqueo"]
+    df_hoy = filtro[
+        (filtro["fecha_desbloqueo"].dt.date == hoy.date())
     ].copy()
+    print(hoy.date())
+    # print("hola")
+    # print(filtro["fecha_desbloqueo"].dt.date)
+    # print(df_hoy)
     return df_hoy
 
 # --- Tabs ---
@@ -316,8 +333,10 @@ with tab6:
     st.subheader("📅 Jugadores con cláusula abierta o desbloqueada hoy")
 
     # 👇 Pasamos la clave diaria
-    df_hoy = clausulas_abiertas_hoy(df_jugadores, daily_refresh_key())
+    df_hoy = clausulas_abiertas_hoy(df_jugadores_diario, daily_refresh_key())
     now = pd.Timestamp.now(tz=TZ)
+
+    print(df_hoy)
 
     df_hoy = df_hoy[df_hoy["fecha_desbloqueo"].notna() & (df_hoy["fecha_desbloqueo"] < now)].copy()
 
