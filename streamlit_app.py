@@ -4,6 +4,8 @@ import plotly.express as px
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
+st.stop()
+
 from data_loader import (
     get_biwenger_token,
     get_league_data,
